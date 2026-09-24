@@ -1,0 +1,21 @@
+{
+  "name": "tucker-survey",
+  "description": "Gcore peering / embedded-cache partner survey on FastEdge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "check": "node scripts/check.mjs",
+    "build": "tsc && fastedge-build --input ./src/index.ts --output ./dist/tucker-survey.wasm --tsconfig ./tsconfig.json",
+    "dev": "npm run build && node scripts/dev.mjs",
+    "test": "npm run build && node tests/app.test.mjs",
+    "deploy": "npm run build && node scripts/deploy.mjs",
+    "export": "node scripts/export.mjs"
+  },
+  "devDependencies": {
+    "@gcoredev/fastedge-sdk-js": "^2.5.2",
+    "@gcoredev/fastedge-test": "^0.2.6",
+    "typescript": "^5.0.0"
+  }
+}

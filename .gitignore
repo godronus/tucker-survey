@@ -1,0 +1,21 @@
+# Dependencies & build artifacts
+**/node_modules/
+**/dist/
+**/*.wasm
+exports/
+.local-kv.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# dotenv environment variable files
+.env
+.env.*
+!.env.example
+
+# other
+.DS_Store
+/.idea
+.vscode/*
+!.vscode/settings.json

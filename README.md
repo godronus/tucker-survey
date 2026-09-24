@@ -64,7 +64,7 @@ Everything is in [`quickstart.md`](quickstart.md). In short:
 npm install
 npm run setup                          # .env + secrets; run the printed SQL in Supabase
 npm run check                          # verifies the wiring
-npm test                               # 13 end-to-end tests against your Supabase project
+npm test                               # 14 end-to-end tests against your Supabase project
 npm run dev                            # http://localhost:8080 (writes real rows)
 GCORE_API_KEY=... npm run deploy       # create/update the FastEdge app from .env
 ```
@@ -154,7 +154,13 @@ where c.contacted_at is null;
   - A submission needs a valid token that is at least 15 s old and at most 7 days old.
   - If someone submits sooner, the browser waits out the remaining seconds and retries automatically.
 - **Honeypot field:** the form has a `website` field that people never see. If it's filled in, the app replies with success but stores nothing.
-- **Rate limit:** 20 submissions per IP per hour per PoP, using `fastedge::cache`. It fails open, so a cache error never loses a real response.
+- **Rate limit:** one submission per client IP per 5-minute window, per PoP, using `fastedge::cache` (`claimSubmitSlot` in `src/index.ts`).
+  - The claim is atomic (`incr`), so a parallel burst from one IP stores one response. The keys are per window, so a cache fault can't lock an IP out permanently. The trade-off is that two submissions can land either side of a window boundary.
+  - A form that fails validation doesn't use up the window. A retry of the same response is let through (the database ignores duplicates). A failed database write releases the window.
+  - The IP comes from `event.client.address`, which the PoP sets. Sending `x-real-ip` or `x-forwarded-for` doesn't bypass it (checked on the edge). The IP is kept only as an HMAC tag in a 5-minute cache entry.
+  - The browser shows how long to wait and retries by itself if it's under 30 s. Colleagues behind one office NAT have to take turns, which is acceptable for this audience; change `SUBMIT_WINDOW_S` if not.
+  - It fails open: a cache error never loses a genuine response.
+  - **This isn't DDoS protection.** Every request still runs the app. For volumetric attacks, put the app behind a Gcore CDN resource with WAAP / rate-limiting rules.
 - **Validation:**
   - In the app, every answer is checked against `shared/survey.js`, payloads are capped at 100 KB and unknown fields are dropped.
   - In the database, check constraints and primary keys back that up.

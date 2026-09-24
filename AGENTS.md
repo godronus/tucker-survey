@@ -29,7 +29,7 @@ tests/app.test.mjs    end-to-end tests: built wasm -> real Supabase project; cle
 | `npm run setup` | Create `.env` (asks for the Supabase URL and publishable key; generates secrets; prints the admin-token SQL) |
 | `npm run check` | Read-only check of `.env` and the Supabase project (schema, admin token, functions) |
 | `npm run build` | `tsc` type check, then `fastedge-build` → `dist/tucker-survey.wasm` |
-| `npm test` | Build, then 13 end-to-end tests against the Supabase project in `.env`. Deletes what it creates |
+| `npm test` | Build, then 14 end-to-end tests against the Supabase project in `.env`. Deletes what it creates |
 | `npm run dev` | Build, then serve locally on http://localhost:8080 (writes **real rows** to Supabase) |
 | `npm run deploy` | Build, then create or update the FastEdge app, secret and settings from `.env` (needs `GCORE_API_KEY`) |
 | `npm run export` | Dump all responses to `exports/<timestamp>/` (JSON + CSV) |
@@ -72,21 +72,22 @@ After changing code, the minimum you must run is `npm run build && npm test`. If
 
 13. **No Node APIs** (`fs`, `path`, `process`, `Buffer`, `node:crypto`) in `src/` or in shared code imported by `src/`. Use web APIs: `fetch`, `crypto.subtle`, `TextEncoder`.
 14. **Static files are embedded at build time** with `readFileSync` from `fastedge::fs`, at module top level only. **A new file in `public/` must also be added to the `embed(...)` list in `src/index.ts`**, or it will 404.
-15. **Watch the time budget.** Each request has a small execution-time budget (50 ms on Basic, 200 ms on Pro), and the Supabase round trip counts against it. Keep **one** database call per request. Don't add sequential outbound `fetch` calls.
-16. **Logging goes through `console.log` only** (stdout). Log short, non-sensitive facts ("stored response <id>", error codes).
-17. **Config comes from `getEnv` (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`) and `getSecret` (`FORM_SECRET`)**, read at request time and never at module top level. If you add a setting, update `.env.example`, `scripts/setup.mjs`, `scripts/deploy.mjs` and `quickstart.md`.
+15. **The per-IP submit limit** (`claimSubmitSlot`, 1 per `SUBMIT_WINDOW_S`) runs *after* validation and before the database write. Keep that order. Tests without an `x-real-ip` header aren't limited; `npm run dev` injects `x-real-ip: 127.0.0.1`, so locally you can submit only once per 5 minutes.
+16. **Watch the time budget.** Each request has a small execution-time budget (50 ms on Basic, 200 ms on Pro), and the Supabase round trip counts against it. Keep **one** database call per request. Don't add sequential outbound `fetch` calls.
+17. **Logging goes through `console.log` only** (stdout). Log short, non-sensitive facts ("stored response <id>", error codes).
+18. **Config comes from `getEnv` (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`) and `getSecret` (`FORM_SECRET`)**, read at request time and never at module top level. If you add a setting, update `.env.example`, `scripts/setup.mjs`, `scripts/deploy.mjs` and `quickstart.md`.
 
 ### Frontend
 
-18. **The CSP is `default-src 'self'`.** No external scripts, fonts, analytics or CDNs; everything is served by the app. No inline `<script>` or `on*=` attributes.
-19. **Accessibility is a requirement.** Use native inputs inside `fieldset`/`legend`, link errors with `aria-describedby`, keep touch targets at least 44 px, keep keyboard alternatives for ranking (the ↑/↓ buttons), and make sure there's no horizontal scroll at 390 px wide.
-20. **Autosave:** answers live in `localStorage` under `tucker-survey:v<version>` until the server confirms. Never clear them before a 2xx.
-21. **Styling:** colours are CSS variables in `:root` in `public/styles.css`. Reuse them.
+19. **The CSP is `default-src 'self'`.** No external scripts, fonts, analytics or CDNs; everything is served by the app. No inline `<script>` or `on*=` attributes.
+20. **Accessibility is a requirement.** Use native inputs inside `fieldset`/`legend`, link errors with `aria-describedby`, keep touch targets at least 44 px, keep keyboard alternatives for ranking (the ↑/↓ buttons), and make sure there's no horizontal scroll at 390 px wide.
+21. **Autosave:** answers live in `localStorage` under `tucker-survey:v<version>` until the server confirms. Never clear them before a 2xx.
+22. **Styling:** colours are CSS variables in `:root` in `public/styles.css`. Reuse them.
 
 ### Secrets and hygiene
 
-22. **Never commit `.env`**, and never print its values into chat, logs or docs. To show someone a value, tell them which `.env` line to read.
-23. **Don't commit account-specific IDs or URLs** (FastEdge app IDs, `*.fastedge.cdn.gc.onl` URLs, Supabase project refs). If a tool inserts a `/* FastEdge Deployment Magic Comments */` block into `src/index.ts`, remove it before committing. `npm run deploy` finds the app by name, so it doesn't need them.
+23. **Never commit `.env`**, and never print its values into chat, logs or docs. To show someone a value, tell them which `.env` line to read.
+24. **Don't commit account-specific IDs or URLs** (FastEdge app IDs, `*.fastedge.cdn.gc.onl` URLs, Supabase project refs). If a tool inserts a `/* FastEdge Deployment Magic Comments */` block into `src/index.ts`, remove it before committing. `npm run deploy` finds the app by name, so it doesn't need them.
 
 ## Test data
 
@@ -118,4 +119,4 @@ Run `npm test`, then `GCORE_API_KEY=… npm run deploy`. Use `APP_NAME=tucker-su
 
 ## Claude Code plugin (optional)
 
-If the `gcore-fastedge` Claude Code plugin is installed, `/gcore-fastedge:*` skills (docs, test, debug, manage) are available and useful for FastEdge questions. Deploy with `npm run deploy` rather than `/gcore-fastedge:deploy`: the script also creates the secret and settings from `.env`, and it doesn't insert magic comments (rule 23).
+If the `gcore-fastedge` Claude Code plugin is installed, `/gcore-fastedge:*` skills (docs, test, debug, manage) are available and useful for FastEdge questions. Deploy with `npm run deploy` rather than `/gcore-fastedge:deploy`: the script also creates the secret and settings from `.env`, and it doesn't insert magic comments (rule 24).

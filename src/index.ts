@@ -36,7 +36,7 @@ const SECURITY_HEADERS = {
 const MAX_BODY = 100_000; // bytes; a full response is typically 3–10 KB
 const TOKEN_MIN_AGE_S = 15; // nobody finishes 10 sections faster than this
 const TOKEN_MAX_AGE_S = 7 * 24 * 3600;
-const SUBMITS_PER_IP_PER_HOUR = 20;
+const SUBMIT_WINDOW_S = 300; // one submission per client IP per 5-minute window
 const ID_RE = /^[0-9a-z]{6,12}-[0-9a-f]{16,32}$/;
 
 function json(data: unknown, status = 200): Response {
@@ -103,17 +103,45 @@ async function checkToken(
   return age;
 }
 
-/** Per-PoP, per-IP hourly submit limit. Fails open: a cache hiccup must not lose a response. */
-async function rateLimited(ip: string): Promise<boolean> {
-  if (!ip) return false;
-  const key = `rl:${ip}:${Math.floor(Date.now() / 3_600_000)}`;
+type Slot = { retryAfter: number } | { release: () => Promise<void> };
+
+/**
+ * One submission per client IP per SUBMIT_WINDOW_S, per PoP (Cache is PoP-local).
+ * - Atomic claim via `incr`, so a parallel burst from one IP gets one success.
+ * - Time-bucketed key: a failed `expire` can never lock an IP out for good.
+ *   (Cost: two submissions can straddle a bucket boundary.)
+ * - The IP is only kept as an HMAC tag in a 5-minute cache entry, never stored.
+ * - A retry of the response that claimed the window is let through; the
+ *   database ignores the duplicate.
+ * - Fails open: a cache error must not lose a genuine response.
+ */
+async function claimSubmitSlot(ip: string, id: string): Promise<Slot> {
+  const noop: Slot = { release: async () => {} };
+  if (!ip) return noop;
+  const now = Math.floor(Date.now() / 1000);
+  const bucket = Math.floor(now / SUBMIT_WINDOW_S);
+  const retryAfter = (bucket + 1) * SUBMIT_WINDOW_S - now;
   try {
+    const tag = hex(
+      await crypto.subtle.sign("HMAC", await hmacKey(), new TextEncoder().encode(`rl:${ip}`)),
+    ).slice(0, 32);
+    const key = `rl:${tag}:${bucket}`;
     const n = await Cache.incr(key);
-    await Cache.expire(key, { ttl: 3600 }); // time-bucketed key, so expiring every call is safe
-    return n > SUBMITS_PER_IP_PER_HOUR;
+    await Cache.expire(key, { ttl: SUBMIT_WINDOW_S });
+    if (n === 1) {
+      await Cache.set(`${key}:id`, id, { ttl: SUBMIT_WINDOW_S });
+      return {
+        release: async () => {
+          await Cache.decr(key).catch(() => {});
+        },
+      };
+    }
+    const owner = await Cache.get(`${key}:id`);
+    if (owner && (await owner.text()) === id) return noop; // same response, retried
+    return { retryAfter };
   } catch (err) {
     console.log(`rate-limit cache error (failing open): ${err}`);
-    return false;
+    return noop;
   }
 }
 
@@ -149,9 +177,6 @@ async function submit(event: FetchEvent): Promise<Response> {
       400,
     );
 
-  if (await rateLimited(event.client.address))
-    return json({ error: "rate_limited" }, 429);
-
   const { errors, answers, contact } = validateAnswers(body.answers) as {
     errors: Record<string, string>;
     answers: Record<string, unknown>;
@@ -160,29 +185,39 @@ async function submit(event: FetchEvent): Promise<Response> {
   if (Object.keys(errors).length)
     return json({ error: "invalid", fields: errors }, 422);
 
+  // After validation, so a form with errors never uses up the IP's window.
+  const slot = await claimSubmitSlot(event.client.address, body.id);
+  if ("retryAfter" in slot)
+    return json({ error: "rate_limited", retryAfter: slot.retryAfter }, 429);
+
   // One call, one transaction. Keyed by the client-generated id: a retry after
   // a timeout is a no-op in the database rather than a duplicate.
-  await rpc("submit_response", {
-    p: {
-      response: {
-        id: body.id,
-        version: SURVEY.version,
-        // Country only: client IP and ASN would de-anonymise an operator survey.
-        country: event.client.geo.countryCode || null,
-        durationSec: age,
-        answers,
+  try {
+    await rpc("submit_response", {
+      p: {
+        response: {
+          id: body.id,
+          version: SURVEY.version,
+          // Country only: client IP and ASN would de-anonymise an operator survey.
+          country: event.client.geo.countryCode || null,
+          durationSec: age,
+          answers,
+        },
+        ...relationalRows(answers),
+        contact: Object.keys(contact).length
+          ? {
+              name: contact.contactName,
+              email: contact.contactEmail,
+              organization: contact.contactOrg,
+              asn: contact.contactAsn,
+            }
+          : null,
       },
-      ...relationalRows(answers),
-      contact: Object.keys(contact).length
-        ? {
-            name: contact.contactName,
-            email: contact.contactEmail,
-            organization: contact.contactOrg,
-            asn: contact.contactAsn,
-          }
-        : null,
-    },
-  });
+    });
+  } catch (err) {
+    await slot.release(); // let them retry straight away
+    throw err;
+  }
   console.log(`stored response ${body.id}`);
   return json({ ok: true, id: body.id });
 }

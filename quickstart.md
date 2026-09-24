@@ -99,11 +99,11 @@ Supabase may show warnings such as *"RLS enabled, no policies"* for the `survey`
 ## Step 5: Try it locally
 
 ```bash
-npm test        # builds the app and runs 13 end-to-end tests against your Supabase project
+npm test        # builds the app and runs 14 end-to-end tests against your Supabase project
 npm run dev     # starts the survey at http://localhost:8080
 ```
 
-- `npm test` should finish with **`13/13 passed; cleaned up N test responses`**. It deletes everything it creates.
+- `npm test` should finish with **`14/14 passed; cleaned up N test responses`**. It deletes everything it creates.
 - **Open http://localhost:8080** and click through the survey:
   - The embedded-cache questions only appear if you answer **Yes** (or *evaluating*) to "Do you currently operate embedded caches…".
   - Reloading the page keeps your answers.
@@ -185,6 +185,7 @@ Your local test responses are real rows in Supabase. You'll clear them before la
 | `npm run deploy`: *Gcore API rejected the key* | The token is wrong, expired, or lacks FastEdge permissions. Create a new one (step 6) |
 | `npm run deploy`: *app update failed … name* | The name is taken by an app you can't update. Use `APP_NAME=<other-name> npm run deploy` |
 | Survey says *"We couldn't save your response"* | Supabase is unreachable or paused, or the app is misconfigured. Run `npm run check`, then `npm run deploy` to push the config again. Respondents' answers stay saved in their browser, so they can retry |
+| Survey says *"Someone on your network submitted a response in the last few minutes"* | Working as intended: one submission per IP per 5 minutes. Answers stay in the browser; submit again after the time shown. Locally (`npm run dev`) every submission shares one IP, so wait 5 minutes between test submissions |
 | Live URL returns **532** | Timeout. Supabase is too far from that PoP for the app's plan. See *Plan and timeout* in step 6 |
 | Live URL returns **530/531** | Bad deploy. Rerun `npm test`, then `npm run deploy` |
 | `/admin` rejects the password | The `ADMIN_TOKEN` in your `.env` doesn't match the hash in Supabase. Run `npm run check` and follow its SQL |

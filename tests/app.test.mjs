@@ -206,6 +206,32 @@ const suite = defineTestSuite({
       },
     },
     {
+      name: 'one submission per IP per 5 minutes; retries and failed forms do not use it up',
+      async run(runner) {
+        // Tests without an x-real-ip header have no client IP and are not limited.
+        const ip = `198.51.100.${1 + randomBytes(1)[0] % 250}`;
+        const as = (body) => runHttpRequest(runner, {
+          path: '/api/submit', method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-real-ip': ip }, body: JSON.stringify(body),
+        });
+        const bad = await as({ id: newId(), token: token(), answers: { ...BASE, role: undefined } });
+        assertHttpStatus(bad, 422); // invalid form: must not consume the window
+        const first = newId();
+        assertHttpStatus(await as({ id: first, token: token(), answers: BASE }), 200);
+        const second = await as({ id: newId(), token: token(), answers: BASE });
+        assertHttpStatus(second, 429);
+        const { error, retryAfter } = assertHttpJson(second);
+        assert(error === 'rate_limited' && retryAfter > 0 && retryAfter <= 300, second.body);
+        assertHttpStatus(await as({ id: first, token: token(), answers: BASE }), 200); // retry of the same response
+        const other = await runHttpRequest(runner, {
+          path: '/api/submit', method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-real-ip': `203.0.113.${1 + randomBytes(1)[0] % 250}` },
+          body: JSON.stringify({ id: newId(), token: token(), answers: BASE }),
+        });
+        assertHttpStatus(other, 200);
+      },
+    },
+    {
       name: 'admin API requires the admin token',
       async run(runner) {
         const denied = await runHttpRequest(runner, { path: '/admin/api/entries' });

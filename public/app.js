@@ -239,8 +239,9 @@ async function submit(form, status) {
       res = await send();
       data = await res.json().catch(() => ({}));
     }
-    // Anti-bot minimum fill time: a fast human just waits a few seconds.
-    if (data.error === 'token_too_fast' && data.retryAfter <= 30) {
+    // Anti-bot minimum fill time, or the tail end of the per-IP window:
+    // a short wait is friendlier than an error.
+    if ((data.error === 'token_too_fast' || data.error === 'rate_limited') && data.retryAfter <= 30) {
       await new Promise((r) => setTimeout(r, data.retryAfter * 1000 + 500));
       res = await send();
       data = await res.json().catch(() => ({}));
@@ -263,7 +264,7 @@ async function submit(form, status) {
     const messages = {
       token_too_fast: 'That was quick! Please check your answers, then submit again.',
       token_expired: 'This page has been open too long. Please reload it (your answers are kept) and submit again.',
-      rate_limited: 'Too many submissions from your network in the last hour. Your answers are saved in this browser; please try again later.',
+      rate_limited: `Someone on your network submitted a response in the last few minutes, and we accept one at a time per network. Your answers are saved in this browser; please submit again in about ${Math.max(1, Math.ceil((data.retryAfter || 300) / 60))} minute(s).`,
     };
     throw new Error(messages[data.error] || '');
   } catch (err) {
